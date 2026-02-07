@@ -1,63 +1,120 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
-	"io/ioutil"
-	"github.com/benbusby/namebuster/utils"
+	"io"
+	"net/http"
 	"os"
+	"regexp"
 	"strings"
 )
 
 var usage = `
   Usage: namebuster <text|url|file>
 
-  Example (names): namebuster "We appreciate it very much, Tim Apple."
-  Example (url):   namebuster https://sauna.htb
-  Example (file):  namebuster carlton_banks_dance.txt
-
-  Full Example (using kerbrute):
-  $ namebuster "Fergus Smith" > usernames.txt
-  $ kerbrute_linux_amd64 userenum usernames.txt -d DOMAIN.LOCAL --dc domain.com
-
+  Example (names): namebuster "John Doe" > usernames.txt
+  Example (single): namebuster "admin" > usernames.txt
+  Example (url):    namebuster https://example.com > usernames.txt
+  Example (file):   namebuster employees.txt > usernames.txt
 `
 
 // Namebuster acts as the primary method for the CLI tool.
-// @input: Either a string of text, file, or URL to read from.
-// returns: Slice of string usernames
 func Namebuster(input string) []string {
 	var parsedNames []string
 	var result []string
 	var names []string
 
-	if utils.ValidUrl(input) {
-		// Find names on website
-		names = utils.FindNames(utils.FetchSiteContent(input))
+	// 1. Determine Input Type and Extract Content
+	if isValidUrl(input) {
+		content := fetchSiteContent(input)
+		// For URLs, we still scrape for patterns because HTML is messy
+		names = findNamesInText(content)
 	} else if _, err := os.Stat(input); err == nil {
-		// Find names in file
-		buf, err := ioutil.ReadFile(input)
+		// FIXED: Read file line-by-line instead of Regex scraping
+		fileNames, err := readLines(input)
 		if err == nil {
-			names = utils.FindNames(string(buf))
+			names = fileNames
 		} else {
-			panic(err)
+			fmt.Printf("[!] Error reading file: %v\n", err)
 		}
 	} else {
-		// Find names in string
-		names = utils.FindNames(input)
+		// Treat the input directly as the name
+		names = []string{input}
 	}
 
+	if len(names) == 0 {
+		fmt.Println("[!] No names found/extracted.")
+		return result
+	}
+
+	// 2. Generate Usernames
 	for _, name := range names {
-		// Skip if the results already contain the full first and last name
-		fullName := strings.ReplaceAll(name, " ", "")
-		if contains(parsedNames, fullName) {
+		// Clean up the name
+		name = strings.TrimSpace(name)
+		if name == "" { 
+			continue 
+		}
+
+		// Avoid processing the exact same string twice
+		if contains(parsedNames, name) {
 			continue
 		}
 
-		parsedNames = append(parsedNames, fullName)
+		parsedNames = append(parsedNames, name)
 		result = append(result, generateUsernames(name)...)
 	}
 
 	return result
 }
+
+// --- Helper Functions ---
+
+func isValidUrl(toTest string) bool {
+	return strings.HasPrefix(toTest, "http://") || strings.HasPrefix(toTest, "https://")
+}
+
+func fetchSiteContent(url string) string {
+	resp, err := http.Get(url)
+	if err != nil {
+		fmt.Printf("[!] Could not fetch URL: %v\n", err)
+		return ""
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return ""
+	}
+	return string(body)
+}
+
+// readLines reads a whole file into memory and returns a slice of its lines.
+func readLines(path string) ([]string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	var lines []string
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return lines, scanner.Err()
+}
+
+func findNamesInText(text string) []string {
+	// A simple heuristic for WEBSITES only: Look for "Capitalized Capitalized"
+	r := regexp.MustCompile(`[A-Z][a-z]+\s[A-Z][a-z]+`)
+	return r.FindAllString(text, -1)
+}
+
+// --- Core Logic ---
 
 func contains(items []string, target string) bool {
 	for _, item := range items {
@@ -78,10 +135,8 @@ func addSeparators(nameList []string) []string {
 	for _, element := range nameList {
 		result = append(result, element+".")
 		result = append(result, element+"_")
-		result = append(result, element+"+")
 		result = append(result, element+"-")
 	}
-
 	return result
 }
 
@@ -92,18 +147,31 @@ func stringProduct(left []string, right []string) []string {
 			result = append(result, elementL+elementR)
 		}
 	}
-
 	return result
 }
 
 func generateUsernames(name string) []string {
 	var result []string
 
-	splitNames := strings.Split(name, " ")
-	if len(splitNames) < 2 {
+	// Clean extra whitespace
+	name = strings.TrimSpace(name)
+	splitNames := strings.Fields(name) 
+
+	if len(splitNames) == 0 {
 		return result
 	}
 
+	// Handle Single Word Input (e.g., "bob")
+	if len(splitNames) == 1 {
+		word := splitNames[0]
+		return []string{
+			strings.ToLower(word),
+			strings.ToUpper(word),
+			strings.Title(strings.ToLower(word)),
+		}
+	}
+
+	// Handle Full Name Input (First Last)
 	firstName := splitNames[0]
 	lastName := splitNames[1]
 
@@ -121,43 +189,50 @@ func generateUsernames(name string) []string {
 		strings.ToUpper(lastName),
 	}
 
-	// Add first name only and last name only options as usernames
+	// Add basic names
 	result = append(result, firstNames...)
 	result = append(result, lastNames...)
+	
+	// Prepare First Initial variations
+	fInitials := []string{strings.ToLower(string(firstName[0])), strings.ToUpper(string(firstName[0]))}
+	
+	// Prepare Last Initial variations
+	lInitials := []string{strings.ToLower(string(lastName[0])), strings.ToUpper(string(lastName[0]))}
 
-	// Add username alternatives with symbol and name variations
-	// 1 -- Full first and last name, plus first initial and last name
-	result = append(result, combineNames(
-		append(firstNames, []string{strings.ToLower(string(firstName[0])), strings.ToUpper(string(firstName[0]))}...),
-		lastNames)...)
+	// 1 -- Full first + Full last
+	result = append(result, combineNames(firstNames, lastNames)...)
+	
+	// 2 -- First Initial + Full Last
+	result = append(result, combineNames(fInitials, lastNames)...)
 
-	// 2 -- Full last and first name, plus last initial and first name
-	result = append(result, combineNames(
-		append(lastNames, []string{strings.ToLower(string(lastName[0])), strings.ToUpper(string(lastName[0]))}...),
-		firstNames)...)
+	// 3 -- Full First + Last Initial
+	result = append(result, combineNames(firstNames, lInitials)...)
 
-	// 3 -- First name then last initial combinations
-	result = append(result, combineNames(
-		firstNames,
-		[]string{strings.ToLower(string(lastName[0])), strings.ToUpper(string(lastName[0]))})...)
-
-	// 4 -- Last name then first initial combinations
-	result = append(result, combineNames(
-		lastNames,
-		[]string{strings.ToLower(string(firstName[0])), strings.ToUpper(string(firstName[0]))})...)
+	// 4 -- Full Last + First Initial
+	result = append(result, combineNames(lastNames, fInitials)...)
+	
+	// 5 -- Full Last + Full First
+	result = append(result, combineNames(lastNames, firstNames)...)
 
 	return result
 }
 
 func main() {
-	if len(os.Args) != 2 {
+	if len(os.Args) < 2 {
 		fmt.Print(usage)
 		os.Exit(1)
 	}
 
-	result := Namebuster(os.Args[1])
+	// Handle potential multi-word args passed without quotes
+	input := strings.Join(os.Args[1:], " ")
 
-	for _, value := range result {
-		fmt.Println(value)
+	result := Namebuster(input)
+
+	if len(result) > 0 {
+		for _, value := range result {
+			fmt.Println(value)
+		}
+	} else {
+		fmt.Println("No usernames generated.")
 	}
 }

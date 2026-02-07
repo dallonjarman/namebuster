@@ -7,29 +7,27 @@
 Generates a list of possible common username permutations given a list of names, a url, or a file.
 
 ## Install
-Go: `go install github.com/benbusby/namebuster@latest`
-
-Python ([PyPI](https://pypi.org/project/namebuster/) -- no longer maintained): `pip install namebuster`
+Go: `go install github.com/dallonjarman/namebuster@latest`
 
 ## Usage
 ### Command Line
 ```bash
-bb@archbtw:~$ namebuster                                            
+kali@kali:~$ namebuster                                            
                                                         
-Usage:                                                  
-namebuster <names|url|file>                             
-                                                        
-Example (names): namebuster "John Broccoli, Diana Mango"
-Example (url):   namebuster https://sauna.htb           
-Example (file):  namebuster document.txt
+  Usage: namebuster <text|url|file>
+
+  Example (names): namebuster "John Doe" > usernames.txt
+  Example (single): namebuster "admin" > usernames.txt
+  Example (url):    namebuster https://example.com > usernames.txt
+  Example (file):   namebuster employees.txt > usernames.txt
 ```
 
 For each discovered name, namebuster will generate ~200 possible usernames. You can then use this list with a tool like [kerbrute](https://github.com/ropnop/kerbrute), for example (originally used for the [Sauna](https://app.hackthebox.com/machines/Sauna) machine on [HackTheBox](https://hackthebox.com)):
 
 ```bash
-[ benbusby : ~/test ]
+[ kali : ~/test ]
 $ namebuster https://sauna.htb > usernames.txt
-[ benbusby : ~/test ]
+[ kali : ~/test ]
 $ ./kerbrute_linux_amd64 userenum ./usernames.txt -d DOMAIN.LOCAL --dc sauna.htb
 
     __             __               __
